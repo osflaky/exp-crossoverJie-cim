@@ -1,0 +1,49 @@
+name: A reusable workflow to build and run the unit test suite
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build_and_test:
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - os: macos-latest
+          java: 17
+          arch: arm64
+          runner: macos-latest
+          expander_leg: macos-latest-17-arm64
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '${{ matrix.java }}'
+        distribution: 'temurin'
+        cache: maven
+    - name: Set up Docker (macOS Intel)
+      if: runner.os == 'macOS' && runner.arch == 'X64'
+      run: |
+        brew install docker colima qemu
+        colima start --cpu 3 --memory 6
+        sudo ln -sf "$HOME/.colima/default/docker.sock" /var/run/docker.sock
+        echo "DOCKER_HOST=unix:///var/run/docker.sock" >> "$GITHUB_ENV"
+        echo "TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock" >> "$GITHUB_ENV"
+        printf 'api.version=1.44\n' > "$HOME/.docker-java.properties"
+        docker info
+    - name: Run Checkstyle
+      run: mvn checkstyle:check --file pom.xml
+      continue-on-error: true
+    - name: Build with Maven
+      run: mvn -B package --file pom.xml
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        verbose: true
+    name: build_and_test [${{ matrix.expander_leg }}]
+    timeout-minutes: 150
